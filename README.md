@@ -1,31 +1,53 @@
-# evertouch Security Core
+# evertouch Security Core 🛡️
 
-This repository contains the core security and cryptographic logic of **evertouch**. 
+> **Private by Design.** This repository contains the core cryptographic implementation and security schemas for evertouch.
 
-Our goal is to be **private by design**. To achieve this, we open-source the "Trust Chain" of our application so that security researchers and technical users can verify that:
-1. Encryption and decryption happen exclusively on the user's device.
-2. The server never has access to unencrypted personal data.
-3. Our key derivation and storage follow industry standards.
+evertouch is a secure, self-updating contact identity platform. We believe that privacy shouldn't be a "feature"—it should be the foundation. To back up our claim of being a **Zero-Knowledge** platform, we have open-sourced the "Trust Chain" of our applications.
+
+## 🎯 Purpose
+
+The goal of this repository is to allow security researchers, developers, and users to verify that:
+1. **Local Encryption**: All sensitive contact data is encrypted on the device before reaching any network.
+2. **Zero-Knowledge**: The evertouch servers never see, store, or have the keys to decrypt your personal information.
+3. **Auditability**: Our implementation follows industry-standard cryptographic protocols without backdoors.
 
 ## 📂 Repository Structure
 
-- `/ios`: Cryptographic implementation for iOS (Swift/CryptoKit).
-- `/android`: Cryptographic implementation for Android (Kotlin/Conscrypt/BouncyCastle).
-- `/web`: Decryption logic for the evertouch Web App (Web Crypto API).
-- `/backend`: API Schemas demonstrating that the server only accepts encrypted blobs.
+This repository is a synced mirror of the security-critical components from our private production codebase.
 
-## 📖 Key Documentation
+- **/ios**: iOS implementation using **Swift** and **CryptoKit**. Includes `KeyManager` for Secure Enclave integration and `CryptoService` for AES-GCM/ECIES logic.
+- **/android**: Android implementation using **Kotlin**, **Conscrypt**, and **BouncyCastle**.
+- **/web**: Web-client decryption logic using the **Web Crypto API**, ensuring data is decrypted locally in the browser.
+- **/backend**: **API Schemas** that demonstrate the server-side architecture—proving that the database only accepts and stores encrypted "blobs."
 
-- **[ZERO_KNOWLEDGE_ARCHITECTURE.md](./ZERO_KNOWLEDGE_ARCHITECTURE.md)**: A high-level overview of our security model.
-- **[SecurityGuide.md](./SecurityGuide.md)**: Technical details on algorithms, key derivation, and threat models.
+## ⚙️ Technical Specifications
 
-## 🛡️ Verification
+We utilize modern, audited cryptographic primitives:
 
-You are encouraged to audit the code in this repository. We use industry-standard protocols including:
-- **AES-256-GCM** for data encryption.
-- **PBKDF2-HMAC-SHA256** (600,000 iterations) for password stretching.
-- **HKDF** for key derivation.
-- **ECIES** for secure key exchange.
+| Component | Protocol | Details |
+| :--- | :--- | :--- |
+| **Symmetric Encryption** | AES-256-GCM | Authenticated encryption for all profile data. |
+| **Key Derivation** | PBKDF2-HMAC-SHA256 | 600,000 iterations for password stretching. |
+| **Master Key Expansion** | HKDF | Separates Authentication and Encryption keys. |
+| **Asymmetric Encryption** | ECIES / P-256 | Used for secure key exchange between contacts. |
+| **Storage** | Keychain / Keystore | Hardware-backed security where available. |
+
+## 📖 Documentation
+
+For a deeper dive into how evertouch works, please refer to:
+- **[ZERO_KNOWLEDGE_ARCHITECTURE.md](./ZERO_KNOWLEDGE_ARCHITECTURE.md)**: Our high-level security model and data flow.
+- **[SecurityGuide.md](./ios/SecurityGuide.md)**: Detailed technical breakdown of key rotations and threat models.
+
+## 🤝 Verification & Contributing
+
+We welcome the security community to audit this code. If you find a potential vulnerability, please help us keep evertouch safe by following responsible disclosure:
+
+- **Reporting**: Please email **security@evertouch.app**
+- **Scope**: We are particularly interested in any flaws in the encryption implementation or potential key leakage scenarios.
+
+## 📜 License
+
+The code in this repository is provided for audit and educational purposes. See the [LICENSE](LICENSE) file for more details.
 
 ---
-*Note: This repository is automatically synced with our private development codebase. If you find a vulnerability, please contact us at theo@evertouch.app.*
+*This repository is automatically updated. Manual Pull Requests to this repo may be closed; please contact us directly for contributions.*
