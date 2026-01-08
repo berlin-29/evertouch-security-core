@@ -42,12 +42,12 @@ For a deeper dive into how evertouch works, please refer to:
 
 We welcome the security community to audit this code. If you find a potential vulnerability, please help us keep evertouch safe by following responsible disclosure:
 
-- **Reporting**: Please email **security@evertouch.app**
+- **Reporting**: Please email **theo@evertouch.app**
 - **Scope**: We are particularly interested in any flaws in the encryption implementation or potential key leakage scenarios.
 
 ## 📜 License
 
-The code in this repository is provided for audit and educational purposes. See the [LICENSE](LICENSE) file for more details.
+The code in this repository is provided for audit and educational purposes. See the [LICENSE](LICENSE.md) file for more details.
 
 ---
 *This repository is automatically updated. Manual Pull Requests to this repo may be closed; please contact us directly for contributions.*
