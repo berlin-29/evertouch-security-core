@@ -25,6 +25,7 @@ class EmailListRequest(BaseModel):
         }
 
 class UserSearchResult(BaseModel):
+    id: UUID
     user_id: UUID
     email: str
     public_display_name: Optional[str] = None
