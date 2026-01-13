@@ -161,7 +161,7 @@ class CryptoService {
         // 2. Derive Auth Key (HKDF)
         // Info: "auth-v1"
         let authKeyInfo = "auth-v1".data(using: .utf8)!
-        let authKey = try HKDF<SHA256>.deriveKey(
+        let authKey = HKDF<SHA256>.deriveKey(
             inputKeyMaterial: masterKey,
             salt: Data(), // No extra salt needed for HKDF if input is high entropy
             info: authKeyInfo,
@@ -172,7 +172,7 @@ class CryptoService {
         // 3. Derive Encryption Key (HKDF)
         // Info: "enc-v1"
         let encKeyInfo = "enc-v1".data(using: .utf8)!
-        let encKey = try HKDF<SHA256>.deriveKey(
+        let encKey = HKDF<SHA256>.deriveKey(
             inputKeyMaterial: masterKey,
             salt: Data(),
             info: encKeyInfo,
@@ -182,3 +182,4 @@ class CryptoService {
         return (authKeyBase64, encKey)
     }
 }
+
