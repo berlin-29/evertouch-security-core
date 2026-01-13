@@ -7,7 +7,8 @@ from enum import Enum
 
 class ConnectionStatus(str, Enum):
     connected = "connected"
-    pending = "pending"
+    pending_incoming = "pending_incoming"
+    pending_outgoing = "pending_outgoing"
     not_connected = "not_connected"
 
 class UserLookupRequest(BaseModel):
