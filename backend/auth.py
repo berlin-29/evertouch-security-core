@@ -44,6 +44,7 @@ class UserResponse(BaseModel):
         from_attributes = True
 
 class UserPublicResponse(BaseModel):
+    user_id: UUID
     public_display_name: Optional[str] = None
     public_headline: Optional[str] = None
     public_evertouch_id: Optional[str] = None
