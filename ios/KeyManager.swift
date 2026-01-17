@@ -131,37 +131,58 @@ private class PrivateKeyKeychainService {
     }
 }
 
-// Dedicated Keychain wrapper for User Credentials (iCloud Sync)
-private class CredentialKeychainService {
-    static let service = "com.evertouch.credentials" // Service identifier for web passwords
+// Dedicated Keychain wrapper for User Credentials
+class CredentialKeychainService {
+    static let service = "com.evertouch.credentials"
 
     static func saveCredentials(email: String, secret: String) throws {
         let secretData = secret.data(using: .utf8)!
         
-        // Define the query for an Internet Password
-        // Note: For iCloud Keychain sync, we use kSecAttrSynchronizable: kCFBooleanTrue
         let query: [String: Any] = [
-            kSecClass as String: kSecClassInternetPassword,
-            kSecAttrServer as String: "evertouch.app", // Your domain
+            kSecClass as String: kSecClassGenericPassword, // Use kSecClassGenericPassword for credentials
+            kSecAttrService as String: service,
             kSecAttrAccount as String: email,
             kSecValueData as String: secretData,
-            kSecAttrSynchronizable as String: kCFBooleanTrue!,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly // More secure and consistent
         ]
         
-        // Delete any existing item first
-        SecItemDelete(query as CFDictionary)
+        SecItemDelete(query as CFDictionary) // Delete any existing item first
         
         let status = SecItemAdd(query as CFDictionary, nil)
         guard status == errSecSuccess else {
-            throw CryptoError.keychainError(status: status, message: "Failed to save credentials.")
+            throw CryptoError.keychainError(status: status, message: "Failed to add credentials to Keychain.")
         }
+    }
+
+    static func loadCredentials(email: String) throws -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: email,
+            kSecReturnData as String: kCFBooleanTrue!,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        
+        guard status == errSecSuccess else {
+            if status == errSecItemNotFound { return nil }
+            throw CryptoError.keychainError(status: status, message: "Failed to load credentials from Keychain.")
+        }
+        
+        guard let data = item as? Data, let secret = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return secret
     }
 }
 
 class KeyManager {
+    static let shared = KeyManager()
 
     private var _privateKey: Curve25519.KeyAgreement.PrivateKey?
+    private var _profileSymmetricKey: SymmetricKey?
 
     var privateKey: Curve25519.KeyAgreement.PrivateKey? {
         if _privateKey == nil {
@@ -207,11 +228,17 @@ class KeyManager {
 
     // MARK: - Symmetric Key for Profile
     
-    // DEV_NOTE: This is a temporary, static key for the MVP.
-    // Reverted from secure derivation to maintain compatibility with existing data.
-    // In a final production app, this should be derived securely and migrated properly.
+    /// The symmetric key used for encrypting/decrypting the user's own profile fields.
+    /// Derived from the user's password (HKDF EncKey).
     var profileSymmetricKey: SymmetricKey? {
-        let staticKeyData = Data("a-very-secret-32-byte-static-key".utf8) // Using a 32-byte key for AES-256
+        get { _profileSymmetricKey }
+        set { _profileSymmetricKey = newValue }
+    }
+    
+    /// The static legacy key used for decrypting old profile data during migration.
+    /// DO NOT use for new encryption. This will be removed after migration.
+    var staticLegacyProfileSymmetricKey: SymmetricKey? {
+        let staticKeyData = Data("a-very-secret-32-byte-static-key".utf8) // The old static key
         return SymmetricKey(data: staticKeyData)
     }
     
@@ -219,6 +246,12 @@ class KeyManager {
     
     func saveCredentials(email: String, secret: String) throws {
         try CredentialKeychainService.saveCredentials(email: email, secret: secret)
+    }
+
+    func loadCredentials(email: String) -> String? {
+        // Implementation for loading would go here if needed, 
+        // though we usually use AuthenticationViewModel for this flow.
+        return nil 
     }
 
     // MARK: - LiveCard Secrets
