@@ -9,7 +9,7 @@ import javax.crypto.spec.SecretKeySpec
 class RecoveryService {
 
     companion object {
-        private const val ITERATION_COUNT = 600000 // Matched with iOS
+        private const val ITERATION_COUNT = 600000 // Reverted to 600k for compatibility
         private const val KEY_LENGTH_BITS = 256
     }
 

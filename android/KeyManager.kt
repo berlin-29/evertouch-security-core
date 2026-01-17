@@ -84,37 +84,50 @@ class KeyManager private constructor(context: Context) {
      * Derives Auth and Encryption keys from password and decrypts the user's private key.
      * This MUST be called after a successful login.
      */
-    fun initializeFromLogin(password: String, saltBase64: String, encryptedPrivateKeyBundleBase64: String) {
+    suspend fun initializeFromLogin(password: String, saltBase64: String, encryptedPrivateKeyBundleBase64: String) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
         // 1. Derive Auth and Encryption keys from password (HKDF)
         val (derivedAuthKey, derivedEncKey) = cryptoService.deriveSplitKeys(password, saltBase64)
-        this.authKey = derivedAuthKey
-        this.encryptionKey = derivedEncKey
+        authKey = derivedAuthKey
+        encryptionKey = derivedEncKey
 
         // 2. Decrypt the private key bundle
         val decodedBundleJson = Base64.decode(encryptedPrivateKeyBundleBase64, Base64.NO_WRAP)
         val encryptedData = json.decodeFromString(EncryptedData.serializer(), String(decodedBundleJson, Charsets.UTF_8))
         
         val privateKeyBytes = try {
-            // Attempt 1: Try separate fields (iOS/Standard format for bundles)
+            // Attempt 1: Try separate fields (iOS/Standard format for bundles) with HKDF key
             if (encryptedData.tag != null && encryptedData.nonce.isNotEmpty()) {
                 val decrypted = cryptoService.decryptWithAESGCM(encryptedData, derivedEncKey)
-                android.util.Log.d("KeyManager", "Decrypted private key bundle using separate fields")
+                android.util.Log.d("KeyManager", "Decrypted private key bundle using HKDF key and separate fields")
                 decrypted
             } else {
-                // Attempt 2: Try combined format (Android-specific legacy for bundles)
+                // Attempt 2: Try combined format (Android-specific legacy for bundles) with HKDF key
                 val decrypted = cryptoService.decryptCombined(encryptedData.ciphertext, derivedEncKey)
-                android.util.Log.d("KeyManager", "Decrypted private key bundle using combined format")
+                android.util.Log.d("KeyManager", "Decrypted private key bundle using HKDF key and combined format")
                 decrypted
             }
         } catch (e: Exception) {
-            // Attempt 3: Fallback to legacy PBKDF2 decryption
-            android.util.Log.d("KeyManager", "HKDF decryption failed, trying legacy PBKDF2 fallback...")
+            // HKDF key didn't work. This is likely an old account using PBKDF2-only key.
+            android.util.Log.d("KeyManager", "HKDF key decryption failed, trying legacy PBKDF2 derivation...")
             val salt = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                 java.util.Base64.getDecoder().decode(saltBase64)
             } else {
                 Base64.decode(saltBase64, Base64.DEFAULT)
             }
-            recoveryService.decryptPrivateKeyBundle(encryptedData, password, salt)
+            
+            // This is the expensive 600k iteration call
+            val legacyKey = recoveryService.deriveKeyPBKDF2(password, salt)
+            
+            try {
+                if (encryptedData.tag != null && encryptedData.nonce.isNotEmpty()) {
+                    cryptoService.decryptWithAESGCM(encryptedData, legacyKey)
+                } else {
+                    cryptoService.decryptCombined(encryptedData.ciphertext, legacyKey)
+                }
+            } catch (e2: Exception) {
+                android.util.Log.e("KeyManager", "All decryption attempts for private key bundle failed", e2)
+                throw e2
+            }
         }
         
         // 3. Load and cache the private key
