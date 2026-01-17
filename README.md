@@ -1,7 +1,6 @@
 # evertouch Security Core 🛡️
 
-Check out [evertouch.app](https://evertouch.app)
-[Link to App Store](https://apps.apple.com/app/id6757142921)
+Check out [evertouch.app](https://evertouch.app) and [Link to App Store](https://apps.apple.com/app/id6757142921)
 
 > **Private by Design.** This repository contains the core cryptographic implementation and security schemas for evertouch.
 
