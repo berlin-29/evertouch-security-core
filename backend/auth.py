@@ -1,8 +1,9 @@
 # app/schemas/auth.py
 from pydantic import BaseModel, EmailStr, field_validator
 from uuid import UUID
-from typing import Optional
+from typing import Optional, List
 from app.utils import validate_password_strength
+from .profile import ProfileFieldCreate
 
 class UserCreate(BaseModel):
     email: EmailStr
@@ -133,7 +134,7 @@ class HashMigration(BaseModel):
 class KDFMigration(BaseModel):
     new_auth_key: str
     new_encrypted_private_key_bundle: str
-    profile_fields: Optional[List["ProfileFieldCreate"]] = None
+    profile_fields: Optional[list[ProfileFieldCreate]] = None
     
 class AccountDeletionRequest(BaseModel):
     password: str
