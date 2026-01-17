@@ -134,6 +134,7 @@ class HashMigration(BaseModel):
 class KDFMigration(BaseModel):
     new_auth_key: str
     new_encrypted_private_key_bundle: str
+    public_key: Optional[str] = None
     profile_fields: Optional[list[ProfileFieldCreate]] = None
     
 class AccountDeletionRequest(BaseModel):
