@@ -39,6 +39,9 @@ class UserResponse(BaseModel):
     public_display_name: Optional[str] = None
     public_headline: Optional[str] = None
     public_evertouch_id: Optional[str] = None
+    public_key: Optional[str] = None
+    encrypted_private_key_bundle: Optional[str] = None
+    recovery_salt: Optional[str] = None
     
     class Config:
         from_attributes = True
@@ -114,6 +117,9 @@ class SaltResponse(BaseModel):
 
 class HashMigration(BaseModel):
     new_auth_key: str
+    public_key: Optional[str] = None
+    encrypted_private_key_bundle: Optional[str] = None
+    recovery_salt: Optional[str] = None
 
     @field_validator('new_auth_key')
     @classmethod
@@ -124,5 +130,9 @@ class HashMigration(BaseModel):
             raise ValueError('Auth key cannot be empty')
         return v
 
+class KDFMigration(BaseModel):
+    new_auth_key: str
+    new_encrypted_private_key_bundle: str
+    
 class AccountDeletionRequest(BaseModel):
     password: str
