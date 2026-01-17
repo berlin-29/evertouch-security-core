@@ -8,6 +8,7 @@ from enum import Enum
 class PingType(str, Enum):
     details = "details"
     uptodate = "uptodate"
+    reshare_request = "reshare_request"
 
 class PingRequest(BaseModel):
     ping_type: PingType
@@ -16,6 +17,7 @@ class ConnectionRequestCreate(BaseModel):
     target_user_id: UUID
     requested_pool_id: str
     ciphertext: str # base64
+    encrypted_pool_key: Optional[str] = None # base64
 
 class ConnectionRequestResponse(BaseModel):
     request_id: UUID
@@ -23,6 +25,7 @@ class ConnectionRequestResponse(BaseModel):
     to_user_id: UUID
     requested_pool_id: str
     ciphertext: str # base64
+    encrypted_pool_key: Optional[str] = None # base64
     status: str
     created_at: datetime
     responded_at: Optional[datetime] = None
@@ -38,6 +41,7 @@ class ConnectionRequestResponse(BaseModel):
 class ConnectionRequestAccept(BaseModel):
     selected_pool_id: str
     ciphertext: Optional[str] = None # initial encrypted payload B->A
+    encrypted_pool_key: Optional[str] = None # base64
 
 class ConnectionResponse(BaseModel):
     connection_id: UUID
@@ -58,10 +62,12 @@ class ConnectionResponse(BaseModel):
 class ConnectionUpdate(BaseModel):
     pool_id: str
     ciphertext: str # new encrypted payload for this pool
+    encrypted_pool_key: Optional[str] = None # base64
 
 class SharedPayloadCreate(BaseModel):
     target_user_id: UUID
     ciphertext: str # base64
+    encrypted_pool_key: Optional[str] = None # base64
 
 class SharedPayloadResponse(BaseModel):
     payload_id: UUID

@@ -40,11 +40,16 @@ evertouch is designed to use an asymmetric (Public/Private key) system to allow 
     *   **Private Key:** Stored on the server **encrypted** (via `EncKey` or legacy `PBKDF2`).
     *   **Status:** Key generation and storage implemented in both apps.
 
-2.  **Sharing Flow (Target Architecture):**
-    *   Alice fetches Bob's **Public Key**.
-    *   Alice derives a shared secret using X25519 DH.
-    *   Alice encrypts her contact card using the shared secret.
-    *   **Current MVP Shortcut:** For initial compatibility, connections and shared payloads currently use a **Shared Profile Symmetric Key**. This is a transitional state before fully enabling the per-connection DH handshake.
+2.  **Sharing Flow (Implemented Architecture):**
+    *   **Pool Keys:** For each sharing pool (e.g., "Personal", "Work"), Alice generates a unique **Pool Symmetric Key** (AES-256).
+    *   **Payload Encryption:** Alice encrypts the profile fields for that pool using the *Pool Symmetric Key*. This ciphertext is generated for the recipient.
+    *   **Key Sharing (The "Handshake"):** When sharing with Bob:
+        1.  Alice fetches Bob's **Public Key**.
+        2.  Alice derives a **Shared Secret** using X25519 DH (Alice's Private Key + Bob's Public Key).
+        3.  Alice derives a **Key Encryption Key (KEK)** from this Shared Secret using HKDF (with salt `evertouch-share-key-encryption-salt`).
+        4.  Alice encrypts the **Pool Symmetric Key** using this *KEK*.
+        5.  Alice sends the `Encrypted Payload` (fields) and the `Encrypted Pool Key` to Bob.
+    *   **Decryption:** Bob derives the same Shared Secret (Bob's Private Key + Alice's Public Key), decrypts the Pool Key, and then decrypts the payload.
 
 ## Authentication Flows
 
