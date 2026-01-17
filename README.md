@@ -1,11 +1,8 @@
 # evertouch Security Core 🛡️
 
-Website: https://evertouch.app
-App Store: https://apps.apple.com/app/id6757142921
+Check out [evertouch.app](https://evertouch.app)
+[Link to App Store](https://apps.apple.com/app/id6757142921)
 
-# evertouch Security Core 🛡️
-
-Check out evertouch.app
 > **Private by Design.** This repository contains the core cryptographic implementation and security schemas for evertouch.
 
 evertouch is a secure, self-updating contact identity platform. We believe that privacy shouldn't be a "feature"—it should be the foundation. To back up our claim of being a **Zero-Knowledge** platform, we have open-sourced the "Trust Chain" of our applications.
