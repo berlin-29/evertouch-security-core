@@ -19,6 +19,12 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
 import kotlinx.coroutines.flow.asStateFlow
 
+enum class KDFType(val value: String) {
+    ARGON2ID("Argon2id"),
+    PBKDF2("PBKDF2"),
+    UNKNOWN("Unknown")
+}
+
 class KeyManager private constructor(context: Context) {
 
     companion object {
@@ -51,6 +57,8 @@ class KeyManager private constructor(context: Context) {
 
     private val _isInitialized = kotlinx.coroutines.flow.MutableStateFlow(false)
     val isInitialized = _isInitialized.asStateFlow()
+
+    var kdfType: KDFType = KDFType.UNKNOWN
 
     // --- In-memory cache for derived/decrypted keys ---
     var authKey: String? = null
@@ -85,8 +93,20 @@ class KeyManager private constructor(context: Context) {
      * This MUST be called after a successful login.
      */
     suspend fun initializeFromLogin(password: String, saltBase64: String, encryptedPrivateKeyBundleBase64: String) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-        // 1. Derive Auth and Encryption keys from password (HKDF)
-        val (derivedAuthKey, derivedEncKey) = cryptoService.deriveSplitKeys(password, saltBase64)
+        // 1. Try Argon2id first
+        var keys: Pair<String, SecretKey>? = null
+        try {
+            keys = cryptoService.deriveArgon2Keys(password, saltBase64)
+            kdfType = KDFType.ARGON2ID
+        } catch (e: Exception) {
+            // Fallback to PBKDF2
+            keys = cryptoService.deriveSplitKeys(password, saltBase64)
+            kdfType = KDFType.PBKDF2
+        }
+        
+        val derivedAuthKey = keys!!.first
+        val derivedEncKey = keys!!.second
+        
         authKey = derivedAuthKey
         encryptionKey = derivedEncKey
 
@@ -95,38 +115,54 @@ class KeyManager private constructor(context: Context) {
         val encryptedData = json.decodeFromString(EncryptedData.serializer(), String(decodedBundleJson, Charsets.UTF_8))
         
         val privateKeyBytes = try {
-            // Attempt 1: Try separate fields (iOS/Standard format for bundles) with HKDF key
+            // Attempt 1: Try separate fields (iOS/Standard format for bundles) with current key
             if (encryptedData.tag != null && encryptedData.nonce.isNotEmpty()) {
                 val decrypted = cryptoService.decryptWithAESGCM(encryptedData, derivedEncKey)
-                android.util.Log.d("KeyManager", "Decrypted private key bundle using HKDF key and separate fields")
+                android.util.Log.d("KeyManager", "Decrypted private key bundle using current key and separate fields")
                 decrypted
             } else {
-                // Attempt 2: Try combined format (Android-specific legacy for bundles) with HKDF key
+                // Attempt 2: Try combined format (Android-specific legacy for bundles) with current key
                 val decrypted = cryptoService.decryptCombined(encryptedData.ciphertext, derivedEncKey)
-                android.util.Log.d("KeyManager", "Decrypted private key bundle using HKDF key and combined format")
+                android.util.Log.d("KeyManager", "Decrypted private key bundle using current key and combined format")
                 decrypted
             }
         } catch (e: Exception) {
-            // HKDF key didn't work. This is likely an old account using PBKDF2-only key.
-            android.util.Log.d("KeyManager", "HKDF key decryption failed, trying legacy PBKDF2 derivation...")
-            val salt = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                java.util.Base64.getDecoder().decode(saltBase64)
-            } else {
-                Base64.decode(saltBase64, Base64.DEFAULT)
-            }
-            
-            // This is the expensive 600k iteration call
-            val legacyKey = recoveryService.deriveKeyPBKDF2(password, salt)
-            
-            try {
-                if (encryptedData.tag != null && encryptedData.nonce.isNotEmpty()) {
-                    cryptoService.decryptWithAESGCM(encryptedData, legacyKey)
-                } else {
-                    cryptoService.decryptCombined(encryptedData.ciphertext, legacyKey)
+            // If Argon2 didn't work, maybe it was encrypted with PBKDF2
+            if (kdfType == KDFType.ARGON2ID) {
+                try {
+                    val pbkdf2Key = cryptoService.deriveSplitKeys(password, saltBase64).second
+                    val decrypted = if (encryptedData.tag != null && encryptedData.nonce.isNotEmpty()) {
+                        cryptoService.decryptWithAESGCM(encryptedData, pbkdf2Key)
+                    } else {
+                        cryptoService.decryptCombined(encryptedData.ciphertext, pbkdf2Key)
+                    }
+                    android.util.Log.d("KeyManager", "Decrypted private key bundle using PBKDF2 fallback")
+                    decrypted
+                } catch (e2: Exception) {
+                    throw e2
                 }
-            } catch (e2: Exception) {
-                android.util.Log.e("KeyManager", "All decryption attempts for private key bundle failed", e2)
-                throw e2
+            } else {
+                // HKDF key didn't work and we are already using PBKDF2. This is likely an old account using PBKDF2-only key.
+                android.util.Log.d("KeyManager", "HKDF key decryption failed, trying legacy PBKDF2 derivation...")
+                val salt = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    java.util.Base64.getDecoder().decode(saltBase64)
+                } else {
+                    Base64.decode(saltBase64, Base64.DEFAULT)
+                }
+                
+                // This is the expensive 600k iteration call
+                val legacyKey = recoveryService.deriveKeyPBKDF2(password, salt)
+                
+                try {
+                    if (encryptedData.tag != null && encryptedData.nonce.isNotEmpty()) {
+                        cryptoService.decryptWithAESGCM(encryptedData, legacyKey)
+                    } else {
+                        cryptoService.decryptCombined(encryptedData.ciphertext, legacyKey)
+                    }
+                } catch (e2: Exception) {
+                    android.util.Log.e("KeyManager", "All decryption attempts for private key bundle failed", e2)
+                    throw e2
+                }
             }
         }
         
@@ -234,8 +270,8 @@ class KeyManager private constructor(context: Context) {
     }
 
     private fun deriveKeyEncryptionKey(sharedSecret: ByteArray): SecretKey {
-        val salt = "evertouch-share-key-encryption-salt".toByteArray(Charsets.UTF_8)
-        val info = "evertouch-share-key-encryption-info".toByteArray(Charsets.UTF_8)
+        val salt = "evertouch-kek-salt-v1".toByteArray(Charsets.UTF_8)
+        val info = "evertouch-kek-info-v1".toByteArray(Charsets.UTF_8)
         
         // Use the centralized HKDF implementation in CryptoService
         val derivedKey = cryptoService.hkdfExpand(sharedSecret, salt, info, 32)

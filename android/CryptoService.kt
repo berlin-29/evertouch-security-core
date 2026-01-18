@@ -8,6 +8,8 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 
+import com.lambdapioneer.argon2kt.Argon2Kt
+import com.lambdapioneer.argon2kt.Argon2Mode
 import kotlinx.serialization.Serializable
 import com.schuetz.evertouch.util.Base64ByteArraySerializer
 
@@ -149,6 +151,55 @@ class CryptoService {
         val encKey = SecretKeySpec(encKeyBytes, "AES")
         
         return Pair(authKeyBase64, encKey)
+    }
+
+    fun deriveArgon2Keys(password: String, saltBase64: String): Pair<String, SecretKey> {
+        val salt = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            java.util.Base64.getDecoder().decode(saltBase64)
+        } else {
+            android.util.Base64.decode(saltBase64, android.util.Base64.DEFAULT)
+        }
+
+        val argon2Kt = Argon2Kt()
+        // Recommended parameters: t=3, m=64MB, p=4
+        val result = argon2Kt.hash(
+            mode = Argon2Mode.ARGON2_ID,
+            password = password.toByteArray(Charsets.UTF_8),
+            salt = salt,
+            tCostInIterations = 3,
+            mCostInKibibyte = 65536,
+            parallelism = 4,
+            hashLengthInBytes = 32
+        )
+        val masterKeyBytes = ByteArray(result.rawHash.remaining())
+        result.rawHash.get(masterKeyBytes)
+
+        // 2. Derive Auth Key (HKDF)
+        val authInfo = "auth-v1".toByteArray(Charsets.UTF_8)
+        val authKeyBytes = hkdfExpand(masterKeyBytes, null, authInfo, 32)
+        
+        val authKeyBase64 = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            java.util.Base64.getEncoder().encodeToString(authKeyBytes)
+        } else {
+            android.util.Base64.encodeToString(authKeyBytes, android.util.Base64.NO_WRAP)
+        }
+        
+        // 3. Derive Encryption Key (HKDF)
+        val encInfo = "enc-v1".toByteArray(Charsets.UTF_8)
+        val encKeyBytes = hkdfExpand(masterKeyBytes, null, encInfo, 32)
+        val encKey = SecretKeySpec(encKeyBytes, "AES")
+        
+        return Pair(authKeyBase64, encKey)
+    }
+
+    fun decryptLiveCardPayload(cipher: com.schuetz.evertouch.data.model.LiveCardCipher, secret: ByteArray): ByteArray {
+        val key = SecretKeySpec(secret, "AES")
+        val nonce = android.util.Base64.decode(cipher.nonce, android.util.Base64.NO_WRAP)
+        val ciphertext = android.util.Base64.decode(cipher.ct, android.util.Base64.NO_WRAP)
+        val tag = android.util.Base64.decode(cipher.tag, android.util.Base64.NO_WRAP)
+        
+        val encryptedData = EncryptedData(ciphertext, nonce, tag, cipher.alg)
+        return decryptWithAESGCM(encryptedData, key)
     }
 
     internal fun hkdfExpand(ikm: ByteArray, salt: ByteArray?, info: ByteArray, length: Int): ByteArray {
