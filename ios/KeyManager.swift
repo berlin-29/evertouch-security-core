@@ -178,11 +178,19 @@ class CredentialKeychainService {
     }
 }
 
+enum KDFType: String {
+    case argon2id = "Argon2id"
+    case pbkdf2 = "PBKDF2"
+    case unknown = "Unknown"
+}
+
 class KeyManager {
     static let shared = KeyManager()
 
     private var _privateKey: Curve25519.KeyAgreement.PrivateKey?
     private var _profileSymmetricKey: SymmetricKey?
+    
+    var kdfType: KDFType = .unknown
 
     var privateKey: Curve25519.KeyAgreement.PrivateKey? {
         if _privateKey == nil {
@@ -300,6 +308,8 @@ enum CryptoError: Error, LocalizedError {
     case encryptionFailed
     case decryptionFailed
     case invalidCiphertext
+    case invalidTagForAESGCM
+    case invalidUserId // Added
     case randomByteGenerationFailed(errorDescription: String)
     case keychainError(status: OSStatus, message: String) // Added
 
@@ -321,6 +331,10 @@ enum CryptoError: Error, LocalizedError {
             return description
         case .keychainError(let status, let message):
             return "\(message) Status: \(status)."
+        case .invalidTagForAESGCM:
+            return "invalidTagForAESGCM"
+        case .invalidUserId:
+            return "invalidUserId"
         }
     }
 }

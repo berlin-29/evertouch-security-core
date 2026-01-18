@@ -11,8 +11,61 @@ import CryptoKit
 struct EncryptedData: Codable {
     let ciphertext: Data
     let nonce: Data
-    let tag: Data? // For AES-GCM, ChaChaPoly includes tag in ciphertext implicitly
+    let tag: Data
     let algorithm: String // "AES-GCM" or "ChaChaPoly"
+    
+    enum CodingKeys: String, CodingKey {
+        case ciphertext, nonce, tag, algorithm
+    }
+    
+    // Explicitly define the memberwise initializer
+    // This allows calls like EncryptedData(ciphertext: ..., nonce: ..., tag: ..., algorithm: ...)
+    init(ciphertext: Data, nonce: Data, tag: Data, algorithm: String) {
+        self.ciphertext = ciphertext
+        self.nonce = nonce
+        self.tag = tag
+        self.algorithm = algorithm
+    }
+    
+    // Custom encoding to ensure Data types are always Base64 strings
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(self.ciphertext.base64EncodedString(), forKey: .ciphertext)
+        try container.encode(self.nonce.base64EncodedString(), forKey: .nonce)
+        try container.encode(self.tag.base64EncodedString(), forKey: .tag)
+        try container.encode(self.algorithm, forKey: .algorithm)
+    }
+    
+    // Custom initializer for decoding, explicitly handling Base64 strings for Data types
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        let ciphertextB64 = try container.decode(String.self, forKey: .ciphertext)
+        guard let finalCiphertextData = Data(base64Encoded: ciphertextB64, options: .ignoreUnknownCharacters) else {
+            throw CryptoError.decryptionFailed // Or a more specific error
+        }
+        
+        let nonceB64 = try container.decode(String.self, forKey: .nonce)
+        guard let finalNonceData = Data(base64Encoded: nonceB64, options: .ignoreUnknownCharacters) else {
+            throw CryptoError.decryptionFailed // Or a more specific error
+        }
+        
+        let finalDecodedAlgorithm = try container.decode(String.self, forKey: .algorithm)
+        
+        let tagB64 = try container.decode(String.self, forKey: .tag)
+        guard let finalTagData = Data(base64Encoded: tagB64, options: .ignoreUnknownCharacters) else {
+            if finalDecodedAlgorithm == "AES-GCM" {
+                throw CryptoError.invalidTagForAESGCM // AES-GCM requires a tag
+            } else { // ChaChaPoly might not have an explicit tag field
+                // Call memberwise initializer for ChaChaPoly path
+                self.init(ciphertext: finalCiphertextData, nonce: finalNonceData, tag: Data(), algorithm: finalDecodedAlgorithm)
+                return
+            }
+        }
+        
+        // Call memberwise initializer for AES-GCM path
+        self.init(ciphertext: finalCiphertextData, nonce: finalNonceData, tag: finalTagData, algorithm: finalDecodedAlgorithm)
+    }
 }
 
 enum CryptoServiceError: LocalizedError {
@@ -47,11 +100,8 @@ class CryptoService {
     ///   - key: The symmetric key to use for decryption.
     /// - Returns: The decrypted plaintext data.
     func decryptWithAESGCM(encryptedData: EncryptedData, key: SymmetricKey) throws -> Data {
-        guard let tag = encryptedData.tag else {
-            throw CryptoError.invalidCiphertext
-        }
         let nonce = try AES.GCM.Nonce(data: encryptedData.nonce)
-        let sealedBox = try AES.GCM.SealedBox(nonce: nonce, ciphertext: encryptedData.ciphertext, tag: tag)
+        let sealedBox = try AES.GCM.SealedBox(nonce: nonce, ciphertext: encryptedData.ciphertext, tag: encryptedData.tag)
         return try AES.GCM.open(sealedBox, using: key)
     }
 
@@ -60,11 +110,11 @@ class CryptoService {
     ///   - plaintext: The data to encrypt.
     ///   - key: The symmetric key to use for encryption.
     /// - Returns: An `EncryptedData` struct containing the ciphertext and nonce. (Tag is implicit in ChaChaPoly sealedBox.combined)
-    func encryptWithChaChaPoly(plaintext: Data, key: SymmetricKey) throws -> EncryptedData {
-        let sealedBox = try ChaChaPoly.seal(plaintext, using: key)
-        let nonceData = sealedBox.nonce.withUnsafeBytes { Data($0) }
-        return EncryptedData(ciphertext: sealedBox.combined, nonce: nonceData, tag: nil, algorithm: "ChaChaPoly")
-    }
+//    func encryptWithChaChaPoly(plaintext: Data, key: SymmetricKey) throws -> EncryptedData {
+//        let sealedBox = try ChaChaPoly.seal(plaintext, using: key)
+//        let nonceData = sealedBox.nonce.withUnsafeBytes { Data($0) }
+//        return EncryptedData(ciphertext: sealedBox.combined, nonce: nonceData, tag: nil, algorithm: "ChaChaPoly")
+//    }
 
     /// Decrypts data encrypted with ChaChaPoly.
     /// - Parameters:
@@ -171,6 +221,50 @@ class CryptoService {
 
         // 3. Derive Encryption Key (HKDF)
         // Info: "enc-v1"
+        let encKeyInfo = "enc-v1".data(using: .utf8)!
+        let encKey = HKDF<SHA256>.deriveKey(
+            inputKeyMaterial: masterKey,
+            salt: Data(),
+            info: encKeyInfo,
+            outputByteCount: 32
+        )
+        
+        return (authKeyBase64, encKey)
+    }
+
+    /// Derives authentication and encryption keys from password and salt using Argon2id + HKDF.
+    /// - Parameters:
+    ///   - password: The user's password.
+    ///   - saltBase64: The base64 encoded salt string.
+    /// - Returns: A tuple containing the authKey (base64) and the encKey (SymmetricKey).
+    func deriveArgon2Keys(password: String, saltBase64: String) throws -> (authKey: String, encKey: SymmetricKey) {
+        guard let saltData = Data(base64Encoded: saltBase64) else {
+            throw CryptoError.invalidCiphertext
+        }
+        
+        // 1. Stretch Password (Argon2id)
+        // Recommended parameters: t=3, m=64MB, p=4
+        let masterKeyData = try Argon2Wrapper.deriveKey(
+            password: password, 
+            salt: saltData, 
+            t_cost: 3, 
+            m_cost: 65536, 
+            parallelism: 4, 
+            keyLength: 32
+        )
+        let masterKey = SymmetricKey(data: masterKeyData)
+
+        // 2. Derive Auth Key (HKDF)
+        let authKeyInfo = "auth-v1".data(using: .utf8)!
+        let authKey = HKDF<SHA256>.deriveKey(
+            inputKeyMaterial: masterKey,
+            salt: Data(),
+            info: authKeyInfo,
+            outputByteCount: 32
+        )
+        let authKeyBase64 = authKey.withUnsafeBytes { Data($0).base64EncodedString() }
+
+        // 3. Derive Encryption Key (HKDF)
         let encKeyInfo = "enc-v1".data(using: .utf8)!
         let encKey = HKDF<SHA256>.deriveKey(
             inputKeyMaterial: masterKey,
