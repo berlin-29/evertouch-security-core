@@ -20,7 +20,7 @@ All keys are derived client-side from the user's **Password** and a random **Rec
 2.  **Auth Key (Authentication):**
     *   Derived as: `HKDF(MasterKey, info="auth-v1")`
     *   Sent to the server to prove identity.
-    *   Server stores: `bcrypt(AuthKey)`.
+    *   Server stores: `Argon2id(AuthKey)` (or `bcrypt(AuthKey)` for legacy users).
     *   **Crucial:** The server cannot reverse `AuthKey` to get the `MasterKey` or `Password`.
     *   **Status:** Implemented in iOS and Android. New and migrated accounts use this.
 
@@ -58,11 +58,11 @@ evertouch is designed to use an asymmetric (Public/Private key) system to allow 
 1.  User enters `Email` and `Password`.
 2.  **Client:** Generates a random 32-byte `Salt`.
 3.  **Client:** Stretches password: `MasterKey = PBKDF2(Password, Salt, 600k)`.
-4.  **Client:** Splits keys: `AuthKey = HKDF(MasterKey, "auth")`, `EncKey = HKDF(MasterKey, "enc")`.
+4.  **Client:** Splits keys: `AuthKey = HKDF(MasterKey, "auth-v1")`, `EncKey = HKDF(MasterKey, "enc-v1")`.
 5.  **Client:** Generates X25519 Key Pair.
 6.  **Client:** Encrypts Private Key with `EncKey` (AES-GCM).
 7.  **Client:** Sends `Email`, `AuthKey` (as password), `PublicKey`, `EncryptedPrivateKeyBundle`, and `Salt` to Server.
-8.  **Server:** Hashes `AuthKey` with bcrypt and stores the user record.
+8.  **Server:** Hashes `AuthKey` with Argon2id and stores the user record.
 
 ### 2. Login
 
@@ -73,7 +73,7 @@ evertouch is designed to use an asymmetric (Public/Private key) system to allow 
 5.  **Client:** Stretches: `MasterKey = PBKDF2(Password, Salt, 600k)`.
 6.  **Client:** Derives `AuthKey` = `HKDF(MasterKey, "auth-v1")`.
 7.  **Client:** Sends `AuthKey` to `/auth/login`.
-8.  **Server:** Verifies `bcrypt(AuthKey)`. Returns success + `EncryptedPrivateKeyBundle`.
+8.  **Server:** Verifies `Argon2id(AuthKey)` (or bcrypt). Returns success + `EncryptedPrivateKeyBundle`.
 9.  **Client:** Derives `EncKey` = `HKDF(MasterKey, "enc-v1")`.
 10. **Client:** Decrypts the Private Key Bundle. User is now online and capable of decryption.
 
@@ -84,14 +84,14 @@ For users created before this architecture:
 1.  **Client:** Tries Login with `AuthKey`. **Fails** (Server has hash of raw password).
 2.  **Client:** Fallback: Login with raw `Password`. **Succeeds**.
 3.  **Client:** Immediately calls `POST /auth/migrate-hash` with the new `AuthKey`.
-4.  **Server:** Updates database to store `bcrypt(AuthKey)`.
+4.  **Server:** Updates database to store `Argon2id(AuthKey)`.
 5.  **Next Login:** `AuthKey` login succeeds. Raw password is no longer valid.
 
 ## Threat Model
 
 | Threat | Impact | Mitigation |
 | :--- | :--- | :--- |
-| **Database Leak** | **Low.** Attacker gets `bcrypt(AuthKey)` and encrypted blobs. | Cannot decrypt data without `EncKey`. `AuthKey` cannot be reversed to `Password`. |
+| **Database Leak** | **Low.** Attacker gets `Argon2id(AuthKey)` and encrypted blobs. | Cannot decrypt data without `EncKey`. `AuthKey` cannot be reversed to `Password`. |
 | **Malicious Admin (Passive)** | **None.** Admin sees encrypted data at rest. | Admin does not have `EncKey`. |
 | **Malicious Admin (Active/Sniffer)** | **Medium.** Admin captures `AuthKey` during login. | Admin can impersonate user (log in), but **cannot decrypt** past data because they cannot derive `EncKey` from `AuthKey`. |
 | **Brute Force Attack** | **Very Low.** Attacker tries to guess password offline. | `PBKDF2` with 600,000 rounds makes each guess computationally expensive (~0.5s per guess). |
