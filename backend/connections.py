@@ -55,6 +55,7 @@ class ConnectionResponse(BaseModel):
     target_user_public_display_name: Optional[str] = None
     target_user_public_headline: Optional[str] = None
     target_user_public_evertouch_id: Optional[str] = None
+    target_user_public_key: Optional[str] = None
 
     class Config:
         from_attributes = True
