@@ -8,7 +8,10 @@ class WalletPassRequest(BaseModel):
     description: str | None = None
     background_color: str | None = None
     foreground_color: str | None = None
-    # New fields for nicer UI
+    # Enhanced design fields
+    first_name: str | None = None
+    last_name: str | None = None
+    pool_name: str | None = None
     email: str | None = None
     phone: str | None = None
     headline: str | None = None
