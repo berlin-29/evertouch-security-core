@@ -84,3 +84,10 @@ class SharedPayloadResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class SharedPayloadBatchUpdate(BaseModel):
+    updates: list[SharedPayloadCreate]
+
+class SharedPayloadBatchResponse(BaseModel):
+    updated_count: int
+    message: str = "Batch update completed"
