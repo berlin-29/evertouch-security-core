@@ -78,18 +78,24 @@ private class LiveCardKeychainService {
 // Dedicated Keychain wrapper for private keys (Curve25519)
 private class PrivateKeyKeychainService {
     static let service = "com.evertouch.privateKeyService"
-    static let account = "primaryPrivateKey"
+    
+    private static func getAccount() -> String {
+        if let email = APIClient.shared.userEmail {
+            return "privateKey_\(email)"
+        }
+        return "primaryPrivateKey" // Fallback or legacy default
+    }
 
     static func savePrivateKey(_ privateKey: Curve25519.KeyAgreement.PrivateKey) throws {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
+            kSecAttrAccount as String: getAccount(),
             kSecValueData as String: privateKey.rawRepresentation,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly // More secure
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         ]
         
-        SecItemDelete(query as CFDictionary) // Delete any existing item first
+        SecItemDelete(query as CFDictionary)
         
         let status = SecItemAdd(query as CFDictionary, nil)
         guard status == errSecSuccess else {
@@ -98,7 +104,9 @@ private class PrivateKeyKeychainService {
     }
 
     static func loadPrivateKey() throws -> Curve25519.KeyAgreement.PrivateKey? {
-        let query: [String: Any] = [
+        // 1. Try loading with user-specific account
+        let account = getAccount()
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
@@ -107,7 +115,29 @@ private class PrivateKeyKeychainService {
         ]
         
         var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        var status = SecItemCopyMatching(query as CFDictionary, &item)
+        
+        // 2. If not found and we are using a specific email, try legacy migration
+        if status == errSecItemNotFound && account != "primaryPrivateKey" {
+            let legacyQuery: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: "primaryPrivateKey",
+                kSecReturnData as String: kCFBooleanTrue!,
+                kSecMatchLimit as String: kSecMatchLimitOne
+            ]
+            
+            var legacyItem: CFTypeRef?
+            let legacyStatus = SecItemCopyMatching(legacyQuery as CFDictionary, &legacyItem)
+            
+            if legacyStatus == errSecSuccess, let data = legacyItem as? Data {
+                print("DEBUG: Migrating legacy private key to \(account)")
+                if let key = try? Curve25519.KeyAgreement.PrivateKey(rawRepresentation: data) {
+                    try? savePrivateKey(key) // Save to new slot
+                    return key
+                }
+            }
+        }
         
         guard status == errSecSuccess else {
             if status == errSecItemNotFound { return nil }
@@ -122,10 +152,9 @@ private class PrivateKeyKeychainService {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account
+            kSecAttrAccount as String: getAccount()
         ]
         let status = SecItemDelete(query as CFDictionary)
-        // -25303 (errSecNoSuchAttr) can happen if the item or its attributes are partially missing/corrupt
         guard status == errSecSuccess || status == errSecItemNotFound || status == -25303 else {
             throw CryptoError.keychainError(status: status, message: "Failed to delete private key.")
         }
@@ -135,16 +164,22 @@ private class PrivateKeyKeychainService {
 // Dedicated Keychain wrapper for Recovery Mnemonic
 private class RecoveryMnemonicKeychainService {
     static let service = "com.evertouch.recoveryMnemonic"
-    static let account = "primaryRecoveryMnemonic"
+    
+    private static func getAccount() -> String {
+        if let email = APIClient.shared.userEmail {
+            return "recoveryMnemonic_\(email)"
+        }
+        return "primaryRecoveryMnemonic"
+    }
 
     static func saveMnemonic(_ mnemonic: String) throws {
         let data = mnemonic.data(using: .utf8)!
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
+            kSecAttrAccount as String: getAccount(),
             kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly // Require unlock
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         ]
         
         SecItemDelete(query as CFDictionary)
@@ -156,6 +191,7 @@ private class RecoveryMnemonicKeychainService {
     }
 
     static func loadMnemonic() throws -> String? {
+        let account = getAccount()
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -166,6 +202,23 @@ private class RecoveryMnemonicKeychainService {
         
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
+        
+        if status == errSecItemNotFound && account != "primaryRecoveryMnemonic" {
+            // Migration
+            let legacyQuery: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: "primaryRecoveryMnemonic",
+                kSecReturnData as String: kCFBooleanTrue!,
+                kSecMatchLimit as String: kSecMatchLimitOne
+            ]
+            var legacyItem: CFTypeRef?
+            if SecItemCopyMatching(legacyQuery as CFDictionary, &legacyItem) == errSecSuccess, let data = legacyItem as? Data, let mnemonic = String(data: data, encoding: .utf8) {
+                print("DEBUG: Migrating legacy mnemonic to \(account)")
+                try? saveMnemonic(mnemonic)
+                return mnemonic
+            }
+        }
         
         if status == errSecItemNotFound { return nil }
         guard status == errSecSuccess else {
@@ -180,7 +233,7 @@ private class RecoveryMnemonicKeychainService {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account
+            kSecAttrAccount as String: getAccount()
         ]
         SecItemDelete(query as CFDictionary)
     }
@@ -189,13 +242,19 @@ private class RecoveryMnemonicKeychainService {
 // Dedicated Keychain wrapper for Legacy Symmetric Keys
 private class LegacyKeyKeychainService {
     static let service = "com.evertouch.legacySymmetricKey"
-    static let account = "primaryLegacyKey"
+    
+    private static func getAccount() -> String {
+        if let email = APIClient.shared.userEmail {
+            return "legacyKey_\(email)"
+        }
+        return "primaryLegacyKey"
+    }
 
     static func saveLegacyKey(_ data: Data) throws {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
+            kSecAttrAccount as String: getAccount(),
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         ]
@@ -207,6 +266,7 @@ private class LegacyKeyKeychainService {
     }
 
     static func loadLegacyKey() throws -> Data? {
+        let account = getAccount()
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -216,6 +276,24 @@ private class LegacyKeyKeychainService {
         ]
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
+        
+        if status == errSecItemNotFound && account != "primaryLegacyKey" {
+            // Migration
+            let legacyQuery: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: "primaryLegacyKey",
+                kSecReturnData as String: kCFBooleanTrue!,
+                kSecMatchLimit as String: kSecMatchLimitOne
+            ]
+            var legacyItem: CFTypeRef?
+            if SecItemCopyMatching(legacyQuery as CFDictionary, &legacyItem) == errSecSuccess, let data = legacyItem as? Data {
+                print("DEBUG: Migrating legacy symmetric key to \(account)")
+                try? saveLegacyKey(data)
+                return data
+            }
+        }
+        
         if status == errSecItemNotFound { return nil }
         guard status == errSecSuccess else {
             throw CryptoError.keychainError(status: status, message: "Failed to load legacy key.")
@@ -227,7 +305,7 @@ private class LegacyKeyKeychainService {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account
+            kSecAttrAccount as String: getAccount()
         ]
         SecItemDelete(query as CFDictionary)
     }
@@ -419,6 +497,17 @@ class KeyManager {
     
     func deleteRecoveryMnemonic() throws {
         try RecoveryMnemonicKeychainService.deleteMnemonic()
+    }
+    
+    /// Completely wipes all security-related data from the local Keychain for the current user.
+    func clearAllData() {
+        _privateKey = nil
+        _profileSymmetricKey = nil
+        _legacyProfileSymmetricKey = nil
+        
+        try? PrivateKeyKeychainService.deletePrivateKey()
+        try? LegacyKeyKeychainService.deleteLegacyKey()
+        try? RecoveryMnemonicKeychainService.deleteMnemonic()
     }
 
     // MARK: - Symmetric Key for Profile
