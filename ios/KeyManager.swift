@@ -132,6 +132,60 @@ private class PrivateKeyKeychainService {
     }
 }
 
+// Dedicated Keychain wrapper for Recovery Mnemonic
+private class RecoveryMnemonicKeychainService {
+    static let service = "com.evertouch.recoveryMnemonic"
+    static let account = "primaryRecoveryMnemonic"
+
+    static func saveMnemonic(_ mnemonic: String) throws {
+        let data = mnemonic.data(using: .utf8)!
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly // Require unlock
+        ]
+        
+        SecItemDelete(query as CFDictionary)
+        
+        let status = SecItemAdd(query as CFDictionary, nil)
+        guard status == errSecSuccess else {
+            throw CryptoError.keychainError(status: status, message: "Failed to save recovery mnemonic.")
+        }
+    }
+
+    static func loadMnemonic() throws -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: kCFBooleanTrue!,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess else {
+            throw CryptoError.keychainError(status: status, message: "Failed to load recovery mnemonic.")
+        }
+        
+        guard let data = item as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func deleteMnemonic() throws {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+}
+
 // Dedicated Keychain wrapper for User Credentials
 class CredentialKeychainService {
     static let service = "com.evertouch.credentials"
@@ -235,6 +289,20 @@ class KeyManager {
     func deleteKeyPair() throws {
         _privateKey = nil
         try PrivateKeyKeychainService.deletePrivateKey()
+    }
+
+    // MARK: - Recovery Mnemonic
+    
+    func saveRecoveryMnemonic(_ mnemonic: String) throws {
+        try RecoveryMnemonicKeychainService.saveMnemonic(mnemonic)
+    }
+    
+    func loadRecoveryMnemonic() throws -> String? {
+        return try RecoveryMnemonicKeychainService.loadMnemonic()
+    }
+    
+    func deleteRecoveryMnemonic() throws {
+        try RecoveryMnemonicKeychainService.deleteMnemonic()
     }
 
     // MARK: - Symmetric Key for Profile
