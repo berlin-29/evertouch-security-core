@@ -47,12 +47,17 @@ struct BIP39 {
     
     /// Derives a 256-bit key from a mnemonic phrase using PBKDF2.
     static func mnemonicToKey(mnemonic: String, salt: Data) throws -> SymmetricKey {
+        let normalized = mnemonic.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         let keyData = try PBKDF2Wrapper.deriveKey(
-            password: mnemonic.lowercased().trimmingCharacters(in: .whitespacesAndNewlines),
+            password: normalized,
             salt: salt,
             rounds: 600_000,
             keyLength: 32
         )
+        
+        let hex = keyData.map { String(format: "%02x", $0) }.joined()
+        print("DEBUG: Derived Recovery Key (Hex): \(hex.prefix(8))...\(hex.suffix(8))")
+        
         return SymmetricKey(data: keyData)
     }
     

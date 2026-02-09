@@ -186,6 +186,53 @@ private class RecoveryMnemonicKeychainService {
     }
 }
 
+// Dedicated Keychain wrapper for Legacy Symmetric Keys
+private class LegacyKeyKeychainService {
+    static let service = "com.evertouch.legacySymmetricKey"
+    static let account = "primaryLegacyKey"
+
+    static func saveLegacyKey(_ data: Data) throws {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        ]
+        SecItemDelete(query as CFDictionary)
+        let status = SecItemAdd(query as CFDictionary, nil)
+        guard status == errSecSuccess else {
+            throw CryptoError.keychainError(status: status, message: "Failed to save legacy key.")
+        }
+    }
+
+    static func loadLegacyKey() throws -> Data? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: kCFBooleanTrue!,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess else {
+            throw CryptoError.keychainError(status: status, message: "Failed to load legacy key.")
+        }
+        return item as? Data
+    }
+
+    static func deleteLegacyKey() throws {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+}
+
 // Dedicated Keychain wrapper for User Credentials
 class CredentialKeychainService {
     static let service = "com.evertouch.credentials"
@@ -244,6 +291,7 @@ class KeyManager {
 
     private var _privateKey: Curve25519.KeyAgreement.PrivateKey?
     private var _profileSymmetricKey: SymmetricKey?
+    private var _legacyProfileSymmetricKey: SymmetricKey?
     
     let keyDidBecomeAvailable = PassthroughSubject<Void, Never>()
     
@@ -262,6 +310,10 @@ class KeyManager {
 
     init() {
         _privateKey = try? PrivateKeyKeychainService.loadPrivateKey()
+        // Load legacy key if it exists
+        if let data = try? LegacyKeyKeychainService.loadLegacyKey() {
+            _legacyProfileSymmetricKey = SymmetricKey(data: data)
+        }
     }
 
     /// Generates a new Curve25519 key pair and stores the private key in the Keychain.
@@ -291,6 +343,70 @@ class KeyManager {
         try PrivateKeyKeychainService.deletePrivateKey()
     }
 
+    // MARK: - Legacy Key Support
+    
+    var legacyProfileSymmetricKey: SymmetricKey? {
+        get { _legacyProfileSymmetricKey }
+        set {
+            _legacyProfileSymmetricKey = newValue
+            if let key = newValue {
+                try? LegacyKeyKeychainService.saveLegacyKey(key.withUnsafeBytes { Data($0) })
+            } else {
+                try? LegacyKeyKeychainService.deleteLegacyKey()
+            }
+        }
+    }
+
+    // MARK: - Recovery Bundle
+    
+    struct RecoveryBundle: Codable {
+        let privateKey: Data
+        let profileSymmetricKey: Data
+    }
+    
+    /// Encrypts the Private Key AND the current Profile Symmetric Key into a bundle.
+    func encryptRecoveryBundle(recoveryKey: SymmetricKey) throws -> Data {
+        guard let privateKey = self.privateKey, let symKey = self.profileSymmetricKey else {
+            throw CryptoError.privateKeyUnavailable
+        }
+        
+        let bundle = RecoveryBundle(
+            privateKey: privateKey.rawRepresentation,
+            profileSymmetricKey: symKey.withUnsafeBytes { Data($0) }
+        )
+        
+        let bundleData: Data = try JSONEncoder().encode(bundle)
+        let cryptoService = CryptoService()
+        let encryptedData: EncryptedData = try cryptoService.encryptWithAESGCM(plaintext: bundleData, key: recoveryKey)
+        
+        let finalData: Data = try JSONEncoder().encode(encryptedData)
+        return finalData
+    }
+    
+    /// Decrypts the bundle and returns the Private Key and Old Profile Symmetric Key.
+    func decryptRecoveryBundle(bundleData: Data, recoveryKey: SymmetricKey) throws -> (privateKey: Data, oldSymKey: SymmetricKey) {
+        let encryptedData = try JSONDecoder().decode(EncryptedData.self, from: bundleData)
+        let cryptoService = CryptoService()
+        let decryptedBytes = try cryptoService.decryptWithAESGCM(encryptedData: encryptedData, key: recoveryKey)
+        
+        let bundle = try JSONDecoder().decode(RecoveryBundle.self, from: decryptedBytes)
+        return (bundle.privateKey, SymmetricKey(data: bundle.profileSymmetricKey))
+    }
+    
+    /// Special version for reset flow that takes raw keys.
+    func encryptRecoveryBundleForReset(privateKey: Data, profileSymmetricKey: SymmetricKey, recoveryKey: SymmetricKey) throws -> Data {
+        let bundle = RecoveryBundle(
+            privateKey: privateKey,
+            profileSymmetricKey: profileSymmetricKey.withUnsafeBytes { Data($0) }
+        )
+        
+        let bundleData = try JSONEncoder().encode(bundle)
+        let cryptoService = CryptoService()
+        let encryptedData = try cryptoService.encryptWithAESGCM(plaintext: bundleData, key: recoveryKey)
+        
+        return try JSONEncoder().encode(encryptedData)
+    }
+
     // MARK: - Recovery Mnemonic
     
     func saveRecoveryMnemonic(_ mnemonic: String) throws {
@@ -317,13 +433,6 @@ class KeyManager {
                 keyDidBecomeAvailable.send()
             }
         }
-    }
-    
-    /// The static legacy key used for decrypting old profile data during migration.
-    /// DO NOT use for new encryption. This will be removed after migration.
-    var staticLegacyProfileSymmetricKey: SymmetricKey? {
-        let staticKeyData = Data("a-very-secret-32-byte-static-key".utf8) // The old static key
-        return SymmetricKey(data: staticKeyData)
     }
     
     // MARK: - Credentials (Email/Password)
