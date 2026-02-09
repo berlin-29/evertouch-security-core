@@ -7,7 +7,8 @@
 
 import Foundation
 import CryptoKit
-import Security // Added for Keychain Services
+import Security
+import Combine
 
 // Use a dedicated Keychain wrapper for LiveCard secrets
 private class LiveCardKeychainService {
@@ -190,6 +191,8 @@ class KeyManager {
     private var _privateKey: Curve25519.KeyAgreement.PrivateKey?
     private var _profileSymmetricKey: SymmetricKey?
     
+    let keyDidBecomeAvailable = PassthroughSubject<Void, Never>()
+    
     var kdfType: KDFType = .unknown
 
     var privateKey: Curve25519.KeyAgreement.PrivateKey? {
@@ -240,7 +243,12 @@ class KeyManager {
     /// Derived from the user's password (HKDF EncKey).
     var profileSymmetricKey: SymmetricKey? {
         get { _profileSymmetricKey }
-        set { _profileSymmetricKey = newValue }
+        set { 
+            _profileSymmetricKey = newValue 
+            if newValue != nil {
+                keyDidBecomeAvailable.send()
+            }
+        }
     }
     
     /// The static legacy key used for decrypting old profile data during migration.
