@@ -154,6 +154,7 @@ class PasswordResetWithRecovery(BaseModel):
     recovery_phrase_verification_hash: str # To verify before allowing reset
     new_auth_key: str
     new_encrypted_private_key_bundle: str
+    new_encrypted_recovery_bundle: Optional[str] = None
     
 class AccountDeletionRequest(BaseModel):
     password: str
