@@ -27,3 +27,6 @@ class PublicProfileUpdate(BaseModel):
     public_headline: Optional[str] = None
     public_evertouch_id: Optional[str] = None
     device_token: Optional[str] = None
+
+class DeviceTokenUpdate(BaseModel):
+    device_token: Optional[str] = None

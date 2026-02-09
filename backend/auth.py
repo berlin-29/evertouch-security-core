@@ -43,6 +43,7 @@ class UserResponse(BaseModel):
     public_key: Optional[str] = None
     encrypted_private_key_bundle: Optional[str] = None
     recovery_salt: Optional[str] = None
+    has_recovery_setup: bool = False
     
     class Config:
         from_attributes = True
@@ -136,6 +137,23 @@ class KDFMigration(BaseModel):
     new_encrypted_private_key_bundle: str
     public_key: Optional[str] = None
     profile_fields: Optional[list[ProfileFieldCreate]] = None
+
+class RecoverySetup(BaseModel):
+    encrypted_recovery_bundle: str # Private key encrypted by Recovery Phrase key
+    recovery_phrase_verification_hash: str # Hash of the Recovery Phrase for verification
+
+class RecoveryInitiate(BaseModel):
+    email: EmailStr
+
+class RecoveryInitiateResponse(BaseModel):
+    encrypted_recovery_bundle: str
+    recovery_salt: str
+
+class PasswordResetWithRecovery(BaseModel):
+    email: EmailStr
+    recovery_phrase_verification_hash: str # To verify before allowing reset
+    new_auth_key: str
+    new_encrypted_private_key_bundle: str
     
 class AccountDeletionRequest(BaseModel):
     password: str
