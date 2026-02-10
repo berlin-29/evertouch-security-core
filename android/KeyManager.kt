@@ -14,10 +14,12 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.SecretKeySpec
 import java.util.UUID
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.serializer
 import kotlinx.coroutines.flow.asStateFlow
+import com.schuetz.evertouch.util.ByteArrayBase64Serializer
 
 enum class KDFType(val value: String) {
     ARGON2ID("Argon2id"),
@@ -65,6 +67,28 @@ class KeyManager private constructor(context: Context) {
     var encryptionKey: SecretKey? = null
         private set
     
+    private var _legacyProfileSymmetricKey: SecretKey? = null
+    var legacyProfileSymmetricKey: SecretKey?
+        get() {
+            if (_legacyProfileSymmetricKey == null) {
+                val base64 = sharedPreferences.getString("legacy_profile_key", null)
+                if (base64 != null) {
+                    val keyBytes = Base64.decode(base64, Base64.NO_WRAP)
+                    _legacyProfileSymmetricKey = SecretKeySpec(keyBytes, "AES")
+                }
+            }
+            return _legacyProfileSymmetricKey
+        }
+        set(value) {
+            _legacyProfileSymmetricKey = value
+            if (value != null) {
+                val base64 = Base64.encodeToString(value.encoded, Base64.NO_WRAP)
+                sharedPreferences.edit().putString("legacy_profile_key", base64).apply()
+            } else {
+                sharedPreferences.edit().remove("legacy_profile_key").apply()
+            }
+        }
+    
     private var _privateKey: X25519PrivateKeyParameters? = null
     val privateKey: X25519PrivateKeyParameters
         get() = _privateKey ?: throw IllegalStateException("Private key not available. User must be logged in and initialized.")
@@ -98,6 +122,10 @@ class KeyManager private constructor(context: Context) {
         
         authKey = derivedAuthKey
         encryptionKey = derivedEncKey
+        _legacyProfileSymmetricKey = null // Clear memory state for new session
+
+        // PERSIST METADATA FIRST so legacy derivation has access to salt/bundle if needed
+        persistZKMetadata(saltBase64, encryptedPrivateKeyBundleBase64)
 
         val decodedBundleJson = Base64.decode(encryptedPrivateKeyBundleBase64, Base64.NO_WRAP)
         val encryptedData = json.decodeFromString(serializer<EncryptedData>(), String(decodedBundleJson, Charsets.UTF_8))
@@ -160,16 +188,42 @@ class KeyManager private constructor(context: Context) {
         return sharedPreferences.getBoolean("pending_kdf_migration", false)
     }
 
+    fun setHasRecoverySetup(hasSetup: Boolean) {
+        sharedPreferences.edit()
+            .putBoolean("has_recovery_setup", hasSetup)
+            .apply()
+    }
+
+    fun hasRecoverySetup(): Boolean? {
+        if (!sharedPreferences.contains("has_recovery_setup")) return null
+        return sharedPreferences.getBoolean("has_recovery_setup", false)
+    }
+
+    fun setRecoveryPhraseVerificationHash(hash: String?) {
+        sharedPreferences.edit()
+            .putString("recovery_phrase_verification_hash", hash)
+            .apply()
+    }
+
+    fun getRecoveryPhraseVerificationHash(): String? {
+        return sharedPreferences.getString("recovery_phrase_verification_hash", null)
+    }
+
     fun logout() {
         authKey = null
         encryptionKey = null
         _privateKey = null
+        _legacyProfileSymmetricKey = null
         sharedPreferences.edit()
             .remove("cred_email")
             .remove("cred_secret")
             .remove("zk_salt")
             .remove("zk_bundle")
             .remove("pending_kdf_migration")
+            .remove("legacy_profile_key")
+            .remove("has_recovery_setup")
+            .remove("recovery_phrase_verification_hash")
+            .remove("recovery_mnemonic")
             .apply()
         _isInitialized.value = false
     }
@@ -184,6 +238,49 @@ class KeyManager private constructor(context: Context) {
         
         _privateKey = privKey
         return Pair(privKey.encoded, pubKey.encoded)
+    }
+
+    @Serializable
+    data class RecoveryBundle(
+        @Serializable(with = ByteArrayBase64Serializer::class)
+        val privateKey: ByteArray,
+        @Serializable(with = ByteArrayBase64Serializer::class)
+        val profileSymmetricKey: ByteArray
+    )
+
+    fun encryptRecoveryBundle(recoveryKey: SecretKey): String {
+        val privKey = _privateKey ?: throw IllegalStateException("Private key missing")
+        val symKey = encryptionKey ?: throw IllegalStateException("Symmetric key missing")
+        
+        val bundle = RecoveryBundle(
+            privateKey = privKey.encoded,
+            profileSymmetricKey = symKey.encoded
+        )
+        
+        val bundleJson = json.encodeToString(serializer<RecoveryBundle>(), bundle)
+        val encryptedData = cryptoService.encryptWithAESGCM(bundleJson.toByteArray(Charsets.UTF_8), recoveryKey)
+        val encryptedJson = json.encodeToString(serializer<EncryptedData>(), encryptedData)
+        return Base64.encodeToString(encryptedJson.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+    }
+
+    fun decryptRecoveryBundle(bundleString: String, recoveryKey: SecretKey): Pair<ByteArray, SecretKey> {
+        val decodedJson = String(Base64.decode(bundleString, Base64.NO_WRAP), Charsets.UTF_8)
+        val encryptedData = json.decodeFromString(serializer<EncryptedData>(), decodedJson)
+        val decryptedBytes = cryptoService.decryptWithAESGCM(encryptedData, recoveryKey)
+        
+        val bundle = json.decodeFromString(serializer<RecoveryBundle>(), String(decryptedBytes, Charsets.UTF_8))
+        return Pair(bundle.privateKey, SecretKeySpec(bundle.profileSymmetricKey, "AES"))
+    }
+
+    fun encryptRecoveryBundleForReset(privateKey: ByteArray, profileSymmetricKey: SecretKey, recoveryKey: SecretKey): String {
+        val bundle = RecoveryBundle(
+            privateKey = privateKey,
+            profileSymmetricKey = profileSymmetricKey.encoded
+        )
+        val bundleJson = json.encodeToString(serializer<RecoveryBundle>(), bundle)
+        val encryptedData = cryptoService.encryptWithAESGCM(bundleJson.toByteArray(Charsets.UTF_8), recoveryKey)
+        val encryptedJson = json.encodeToString(serializer<EncryptedData>(), encryptedData)
+        return Base64.encodeToString(encryptedJson.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
     }
     
     fun encryptPrivateKeyBundle(privateKeyBytes: ByteArray, encryptionKey: SecretKey): String {
@@ -244,5 +341,17 @@ class KeyManager private constructor(context: Context) {
 
     fun deleteLiveCardSecret(shareId: UUID) {
         sharedPreferences.edit().remove("live_card_secret_$shareId").apply()
+    }
+
+    fun saveRecoveryMnemonic(mnemonic: String) {
+        sharedPreferences.edit().putString("recovery_mnemonic", mnemonic).apply()
+    }
+
+    fun loadRecoveryMnemonic(): String? {
+        return sharedPreferences.getString("recovery_mnemonic", null)
+    }
+
+    fun deleteRecoveryMnemonic() {
+        sharedPreferences.edit().remove("recovery_mnemonic").apply()
     }
 }
