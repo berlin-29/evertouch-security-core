@@ -34,6 +34,7 @@ class ConnectionRequestResponse(BaseModel):
     from_user_public_display_name: Optional[str] = None
     from_user_public_headline: Optional[str] = None
     from_user_public_evertouch_id: Optional[str] = None
+    from_user_public_key: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -81,6 +82,7 @@ class SharedPayloadResponse(BaseModel):
     # Public profile fields of the sender (to support feeds)
     from_user_public_display_name: Optional[str] = None
     from_user_public_headline: Optional[str] = None
+    from_user_public_key: Optional[str] = None
 
     class Config:
         from_attributes = True

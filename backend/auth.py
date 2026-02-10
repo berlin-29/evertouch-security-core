@@ -44,6 +44,7 @@ class UserResponse(BaseModel):
     encrypted_private_key_bundle: Optional[str] = None
     recovery_salt: Optional[str] = None
     has_recovery_setup: bool = False
+    recovery_phrase_verification_hash: Optional[str] = None
     
     class Config:
         from_attributes = True
