@@ -106,7 +106,7 @@ private class PrivateKeyKeychainService {
     static func loadPrivateKey() throws -> Curve25519.KeyAgreement.PrivateKey? {
         // 1. Try loading with user-specific account
         let account = getAccount()
-        var query: [String: Any] = [
+        let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
@@ -115,7 +115,7 @@ private class PrivateKeyKeychainService {
         ]
         
         var item: CFTypeRef?
-        var status = SecItemCopyMatching(query as CFDictionary, &item)
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
         
         // 2. If not found and we are using a specific email, try legacy migration
         if status == errSecItemNotFound && account != "primaryPrivateKey" {
