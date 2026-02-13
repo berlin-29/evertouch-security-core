@@ -96,6 +96,10 @@ class KeyManager private constructor(context: Context) {
     val publicKey: X25519PublicKeyParameters
         get() = privateKey.generatePublicKey()
 
+    fun isEncryptionReady(): Boolean {
+        return _privateKey != null && encryptionKey != null
+    }
+
     fun isLoggedInAndInitialized(): Boolean {
         return _privateKey != null && encryptionKey != null
     }
