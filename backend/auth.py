@@ -32,7 +32,7 @@ class Token(BaseModel):
     refresh_token: str
 
 class TokenRefresh(BaseModel):
-    refresh_token: str
+    refresh_token: Optional[str] = None
 
 class UserResponse(BaseModel):
     user_id: UUID
@@ -59,8 +59,8 @@ class UserPublicResponse(BaseModel):
         from_attributes = True
 
 class UserWithTokens(UserResponse):
-    access_token: str
-    refresh_token: str
+    access_token: Optional[str] = None
+    refresh_token: Optional[str] = None
     public_key: Optional[str] = None
     encrypted_private_key_bundle: Optional[str] = None
     recovery_salt: Optional[str] = None
