@@ -15,6 +15,7 @@ class LinkCardCreate(BaseModel):
 class LinkCardUpdate(BaseModel):
     ciphertext: Optional[str] = None # base64 encoded
     encrypted_secret: Optional[str] = None
+    label: Optional[str] = None
     expires_at: Optional[datetime] = None
 
 class LinkCardResponse(BaseModel):
