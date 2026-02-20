@@ -34,3 +34,6 @@ class DeviceTokenUpdate(BaseModel):
     device_token: Optional[str] = None
     device_platform: Optional[str] = None
     locale: Optional[str] = None
+
+class DeviceTokenDelete(BaseModel):
+    device_token: str
