@@ -73,6 +73,7 @@ class PasswordResetConfirm(BaseModel):
 
     code: str
 
+    # TODO(compat-removal): delete `new_password` after all active clients send `new_auth_key`.
     # Legacy fallback. New clients should send `new_auth_key`.
     new_password: Optional[str] = None
     new_auth_key: Optional[str] = None
