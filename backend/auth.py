@@ -1,5 +1,5 @@
 # app/schemas/auth.py
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, field_validator, model_validator
 from uuid import UUID
 from typing import Optional, List
 from app.utils import validate_password_strength
@@ -44,7 +44,6 @@ class UserResponse(BaseModel):
     encrypted_private_key_bundle: Optional[str] = None
     recovery_salt: Optional[str] = None
     has_recovery_setup: bool = False
-    recovery_phrase_verification_hash: Optional[str] = None
     
     class Config:
         from_attributes = True
@@ -74,7 +73,9 @@ class PasswordResetConfirm(BaseModel):
 
     code: str
 
-    new_password: str
+    # Legacy fallback. New clients should send `new_auth_key`.
+    new_password: Optional[str] = None
+    new_auth_key: Optional[str] = None
 
     new_public_key: str
 
@@ -82,10 +83,16 @@ class PasswordResetConfirm(BaseModel):
 
     new_recovery_salt: str
 
-    @field_validator('new_password')
-    @classmethod
-    def validate_password(cls, v: str) -> str:
-        return validate_password_strength(v)
+    @model_validator(mode='after')
+    def validate_reset_secret(self) -> "PasswordResetConfirm":
+        if self.new_auth_key:
+            if not self.new_auth_key.strip():
+                raise ValueError("new_auth_key cannot be empty")
+            return self
+        if self.new_password:
+            validate_password_strength(self.new_password)
+            return self
+        raise ValueError("Either new_auth_key or new_password is required")
 
 
 
@@ -141,7 +148,7 @@ class KDFMigration(BaseModel):
 
 class RecoverySetup(BaseModel):
     encrypted_recovery_bundle: str # Private key encrypted by Recovery Phrase key
-    recovery_phrase_verification_hash: str # Hash of the Recovery Phrase for verification
+    recovery_phrase_verification_hash: str # Client-side verifier; server stores only hardened hash.
 
 class RecoveryInitiate(BaseModel):
     email: EmailStr
