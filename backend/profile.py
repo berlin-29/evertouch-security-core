@@ -1,5 +1,5 @@
 # app/schemas/profile.py
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
 from uuid import UUID
 from typing import Optional
@@ -37,3 +37,9 @@ class DeviceTokenUpdate(BaseModel):
 
 class DeviceTokenDelete(BaseModel):
     device_token: str
+
+class LowDetailsFeedbackCreate(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=500)
+    visible_fields_count: Optional[int] = Field(default=None, ge=0)
+    platform: Optional[str] = Field(default=None, max_length=32)
+    app_version: Optional[str] = Field(default=None, max_length=64)
