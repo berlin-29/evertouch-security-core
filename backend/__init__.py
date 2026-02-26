@@ -7,3 +7,4 @@ from . import link_cards
 from . import sync
 from . import health
 from . import notifications
+from . import admin
