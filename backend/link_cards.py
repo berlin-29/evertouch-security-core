@@ -28,6 +28,10 @@ class LinkCardResponse(BaseModel):
     expires_at: Optional[datetime] = None
     revoked: bool
     view_count: int
+    # Owner-facing only. Deliberately absent from LinkCardShareResponse below: a
+    # viewer must not learn when anyone else opened the card. Clients round it to
+    # a day before showing it.
+    last_viewed_at: Optional[datetime] = None
     created_at: datetime
 
     class Config:
