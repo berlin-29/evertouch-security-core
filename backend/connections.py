@@ -13,11 +13,19 @@ class PingType(str, Enum):
 class PingRequest(BaseModel):
     ping_type: PingType
 
+class ConnectionRequestSource(str, Enum):
+    live_card = "live_card"
+    invite = "invite"
+    card_reply = "card_reply"
+
 class ConnectionRequestCreate(BaseModel):
     target_user_id: UUID
     requested_pool_id: str
     ciphertext: str # base64
     encrypted_pool_key: Optional[str] = None # base64
+    source: Optional[ConnectionRequestSource] = None
+    # The card reply this requester sent the target before signing up, if any.
+    card_reply_id: Optional[UUID] = None
 
 class ConnectionRequestResponse(BaseModel):
     request_id: UUID
@@ -29,6 +37,7 @@ class ConnectionRequestResponse(BaseModel):
     status: str
     created_at: datetime
     responded_at: Optional[datetime] = None
+    source: Optional[str] = None
 
     # Public profile fields of the user who sent the request
     from_user_public_display_name: Optional[str] = None

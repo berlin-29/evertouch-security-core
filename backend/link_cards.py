@@ -43,6 +43,9 @@ class LinkCardShareResponse(BaseModel): # For the public GET /link-cards/{share_
     expires_at: Optional[datetime] = None
     revoked: bool
     owner: UserPublicResponse
+    # Lets an anonymous viewer seal a card reply to the owner. A public key;
+    # owner.user_id is already public on this endpoint.
+    owner_public_key: Optional[str] = None
 
     class Config:
         from_attributes = True
